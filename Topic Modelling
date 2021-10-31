@@ -1,0 +1,85 @@
+library(haven)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tidytext)
+library(ggplot2)
+
+### Load file and restrict to columns 1 to 2
+mydataFromR <- mydataFromR[1:2]
+View(mydataFromR)
+
+### Inspect line 3
+mydataFromR$Demo24[3]
+
+### Identify where it says a particular word
+topic.analysis <-mydataFromR %>%
+  mutate(ID = ifelse(str_detect(Demo24, "fellow"), Demo24, NA)) %>% 
+  count(ID) %>%
+  fill(ID) %>%
+  mutate(ID = factor(ID, levels = unique(ID)))
+
+
+### Unnest tokens and remove stop-words
+tidy_demo24 <- mydataFromR %>%
+  unnest_tokens("word", Demo24) %>%
+  anti_join(stop_words)
+
+View(tidy_demo24)
+
+### Check most frequent words
+tidy_demo24 %>% 
+  count(word, sort = TRUE)
+
+### Explore TF-IDF and plot (change ID to participants to arrange this plot
+### by specific demographics)
+
+tidy_demo24 %>%
+  count(ID, word, sort = T) %>%
+  bind_tf_idf(word, ID, n) %>%
+  group_by(ID) %>%
+  top_n(10) %>%
+  ungroup %>%
+  mutate(word = reorder(word, tf_idf)) %>%
+  ggplot(aes(word, tf_idf, fill = ID)) + 
+  geom_col(show.legend = F) +
+  facet_wrap(~ID, scales = "free") +
+  coord_flip()
+  
+
+##############################################
+######## Implementing topic modelling ########
+##############################################
+library(stm)
+library(quanteda)
+
+### Create document frame matrix
+
+demo24_DFM <- tidy_demo24 %>%
+  count(ID, word, sort = T) %>%
+  cast_dfm(ID, word, n)
+
+### Create model
+
+topic_model <- stm(demo24_DFM, K = 3, init.type = "Spectral")
+summary(topic_model)
+
+### Tidy data for plotting
+td_beta <- tidy(topic_model)
+
+td_beta %>%
+  group_by(topic) %>%
+  top_n(10) %>%
+  ungroup %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = topic)) + 
+  geom_col(show.legend = F) +
+  facet_wrap(~topic, scales = "free") +
+  coord_flip()
+
+td_gamma <- tidy(topic_model, matrix = "gamma",
+                 document_names = rownames(demo24_DFM))
+
+ggplot(td_gamma, aes(gamma, fill = as.factor(topic))) +
+  geom_histogram(show, legend = FALSE) + 
+  facet_wrap(~topic, ncol = 3)
